@@ -21,22 +21,33 @@ PLUS_MINUS_SPLIT_PATTERN = re.compile(r'([+-])')
 def render_frac(val: Fraction) -> str:
     """
     将Fraction对象格式化为字符串表示
-
-    Args:
-        val: 要格式化的分数
-
-    Returns:
-        格式化后的字符串，可能是整数、真分数或带分数形式
     """
-    nume, deno = val.numerator, val.denominator
+    # 处理特殊情况
+    if val == 0:
+        return "0"
+
+    # 获取分子和分母的绝对值
+    nume, deno = abs(val.numerator), abs(val.denominator)
+    is_negative = val < 0
+
     if deno == 1:
-        return str(nume)
-    if abs(nume) < deno:
-        return f"{abs(nume)}/{deno}" if val >= 0 else f"-{abs(nume)}/{deno}"
-    whole_part = nume // deno
-    remainder = abs(nume % deno)
-    prefix = '-' if val < 0 else ''
-    return f"{prefix}{abs(whole_part)}'{remainder}/{deno}"
+        return str(val.numerator)  # 直接返回，包含符号
+
+    if nume < deno:
+        # 真分数
+        return f"{val.numerator}/{deno}" if not is_negative else f"-{nume}/{deno}"
+    else:
+        # 带分数
+        whole_part = nume // deno
+        remainder = nume % deno
+
+        if remainder == 0:
+            return str(whole_part) if not is_negative else f"-{whole_part}"
+        else:
+            if is_negative:
+                return f"-{whole_part}'{remainder}/{deno}"
+            else:
+                return f"{whole_part}'{remainder}/{deno}"
 
 
 class CalcNode:
@@ -167,22 +178,28 @@ def make_random_value(bound: int) -> Fraction:
     """生成随机数值"""
     if bound <= 1:
         return Fraction(0)
-    if random.random() < 0.5:
-        return Fraction(random.randint(0, bound - 1))
-    denom = random.randint(2, bound - 1)
-    numer = random.randint(1, denom - 1)
-    return Fraction(numer, denom)
+
+    # 确保bound至少为2
+    effective_bound = max(2, bound)
+
+    if random.random() < 0.7:
+        # 生成整数：从1到effective_bound-1
+        return Fraction(random.randint(1, effective_bound - 1))
+    else:
+        # 生成真分数：分母从2到effective_bound，分子从1到分母-1
+        denom = random.randint(2, effective_bound)
+        numer = random.randint(1, denom - 1)
+        return Fraction(numer, denom)
 
 
 def build_expression(bound: int, max_depth: int, force_operator=False) -> CalcNode:
     """递归构建算术表达式"""
     if max_depth <= 0 or (not force_operator and random.random() < 0.3):
         return CalcNode(const=make_random_value(bound))
-
-    operators = ['+', '-', '*', '/']
-
+    operators = ['+', '-', '*', '/']     # 定义可用的四则运算符
     for _ in range(20):
         op = random.choice(operators)
+        # 递归生成左右子表达式（深度减1）
         left_expr = build_expression(bound, max_depth - 1)
         right_expr = build_expression(bound, max_depth - 1)
 
@@ -191,22 +208,21 @@ def build_expression(bound: int, max_depth: int, force_operator=False) -> CalcNo
             right_val = right_expr.compute()
             if left_val < right_val:
                 left_expr, right_expr = right_expr, left_expr
-
         try:
+            # 构造候选表达式节点
             candidate = CalcNode(lhs=left_expr, oper=op, rhs=right_expr)
-            if candidate.op_count() > 3:
+            if candidate.op_count() > 3:   # 运算符总数不能超过3个
                 continue
-            if not candidate.validate_subtraction():
+            if not candidate.validate_subtraction():   # 所有减法子表达式必须满足 e1 >= e2（防止中间结果为负）
                 continue
-            if not candidate.validate_division():
+            if not candidate.validate_division():    # 所有除法子表达式结果必须是真分数（0 <= result < 1）
                 continue
             result = candidate.compute()
-            if result < 0:
+            if result < 0:     # 最终计算结果不能为负数
                 continue
             return candidate
         except (ZeroDivisionError, ValueError):
-            continue
-
+            continue     # 如果出现除零或非法操作，跳过此次尝试
     return CalcNode(const=make_random_value(bound))
 
 
@@ -294,8 +310,7 @@ def decode_answer(text: str) -> Fraction:
 
             # 检查分数部分格式 - 必须包含 '/'
             if '/' not in frac_part:
-                # 抛出明确的错误信息
-                raise ValueError(f"带分数缺少分数部分，只有整数: {s}")
+                return Fraction(0)
 
             frac_parts = frac_part.split('/')
             if len(frac_parts) != 2:
@@ -309,6 +324,7 @@ def decode_answer(text: str) -> Fraction:
 
             sign = -1 if whole and whole.startswith('-') else 1
             w = abs(int(whole)) if whole and whole not in ('', '-') else 0
+            total_numer = w * int(denom) + int(numer)
             total_numer = w * int(denom) + int(numer)
             return Fraction(sign * total_numer, int(denom))
 
@@ -325,38 +341,48 @@ def decode_answer(text: str) -> Fraction:
             # 纯整数
             return Fraction(int(s))
 
-    except ValueError as e:
-        # 重新抛出这个错误，让主程序捕获
-        raise ValueError(str(e))
-    except Exception:
+
+    except (ValueError, ZeroDivisionError):
+        # 捕获所有解析错误，返回0
         return Fraction(0)
 
 
 def safe_eval_expression(expr: str) -> Fraction:
-    # 在函数内部导入，避免启动时加载
-    from fractions import Fraction
     """安全计算表达式，完全使用分数运算"""
     if not expr or expr.isspace():
         raise ValueError("空表达式")
 
     try:
+        # 清理表达式
+        expr = expr.strip()
+
+        # 处理带分数格式 - 先转换带分数
+        def replace_mixed_fraction(match):
+            whole = match.group(1)
+            numer = match.group(2)
+            denom = match.group(3)
+            return f"({whole} + {numer}/{denom})"
+
+        expr = MIXED_FRACTION_PATTERN.sub(replace_mixed_fraction, expr)
         expr = expr.replace('×', '*').replace('÷', '/')
-        expr = MIXED_FRACTION_PATTERN.sub(r"Fraction(\1 * \3 + \2, \3)", expr)
+
+        # 处理普通分数
         expr = FRACTION_PATTERN.sub(r"Fraction(\1, \2)", expr)
+        # 处理整数
         expr = INTEGER_PATTERN.sub(r"Fraction(\1)", expr)
 
-        tokens = tokenize_expression(expr)
-        expr_with_parens = add_parentheses_by_priority(tokens)
+        # 使用更安全的方式计算
+        result = eval(expr, {"Fraction": Fraction, "__builtins__": {}})
 
-        result = eval(expr_with_parens, {"Fraction": Fraction})
         if isinstance(result, (int, float)):
             return Fraction(result).limit_denominator()
         return result
-
+    # 异常处理
     except ZeroDivisionError:
         raise ValueError("除零错误")
     except (ValueError, SyntaxError) as e:
-        raise ValueError(f"表达式语法错误: {e}")
+        # 提供更详细的错误信息
+        raise ValueError(f"表达式语法错误: {e} ")
     except Exception as e:
         raise ValueError(f"计算错误: {e}")
 
@@ -465,11 +491,26 @@ def calculate_simple_expression(expr: str) -> Fraction:
 def parse_fraction(expr: str) -> Fraction:
     """解析分数或整数"""
     expr = expr.strip()
+
+    # 如果包含运算符，使用安全计算
+    if any(op in expr for op in ['+', '-', '*', '/', '÷', '×']):
+        try:
+            return safe_eval_expression(expr)
+        except:
+            return Fraction(0)
+
+    # 原有的解析逻辑
     if '/' in expr:
         parts = expr.split('/')
         if len(parts) == 2:
-            return Fraction(int(parts[0]), int(parts[1]))
-    return Fraction(int(expr))
+            try:
+                return Fraction(int(parts[0]), int(parts[1]))
+            except (ValueError, ZeroDivisionError):
+                return Fraction(0)
+    try:
+        return Fraction(int(expr))
+    except ValueError:
+        return Fraction(0)
 
 
 def write_problems_batch(quiz_set: List[CalcNode]):
@@ -485,7 +526,7 @@ def write_problems_batch(quiz_set: List[CalcNode]):
         answer_lines.append(f"{idx}. {render_frac(ans_val)}\n")
 
     # 一次性写入文件
-    with open('Exercises.txt', 'w', encoding='utf-8') as exf:
+    with open('Ex.txt', 'w', encoding='utf-8') as exf:
         exf.writelines(exercise_lines)
     with open('Answers.txt', 'w', encoding='utf-8') as anf:
         anf.writelines(answer_lines)
@@ -499,35 +540,51 @@ def check_answers_batch(exercises: List[str], answers: List[str]):
     # 预处理所有题目和答案
     processed_data = []
     for idx, (ex_line, ans_line) in enumerate(zip(exercises, answers), start=1):
-        ex_clean = ex_line.strip()
-        if ex_clean.endswith('='):
-            ex_clean = ex_clean[:-1].strip()
-        if '. ' in ex_clean:
-            expr_raw = ex_clean.split('. ', 1)[1]
-        else:
-            expr_raw = ex_clean
+        try:
+            ex_clean = ex_line.strip()
+            if ex_clean.endswith('='):
+                ex_clean = ex_clean[:-1].strip()
+            if '. ' in ex_clean:
+                expr_raw = ex_clean.split('. ', 1)[1]
+            else:
+                expr_raw = ex_clean
 
-        ans_clean = ans_line.strip()
-        if '. ' in ans_clean:
-            ans_part = ans_clean.split('. ', 1)[1]
-        else:
-            ans_part = ans_clean
+            ans_clean = ans_line.strip()
+            if '. ' in ans_clean:
+                ans_part = ans_clean.split('. ', 1)[1]
+            else:
+                ans_part = ans_clean
 
-        processed_data.append((idx, expr_raw, ans_part))
+            processed_data.append((idx, expr_raw, ans_part, None))
+        except Exception as e:
+            processed_data.append((idx, None, None, f"预处理错误: {e}"))
 
     # 批量计算
     results = []
-    for idx, expr_raw, ans_part in processed_data:
+    for idx, expr_raw, ans_part, error in processed_data:
+        if error:
+            results.append((idx, None, None, error))
+            continue
+
         try:
             computed = safe_eval_expression(expr_raw)
             user_val = decode_answer(ans_part)
             results.append((idx, computed, user_val, None))
         except Exception as e:
-            results.append((idx, None, None, e))
+            results.append((idx, None, None, str(e)))
 
-    # 批量比较结果
-    for idx, computed, user_val, error in results:
-        if error:
+    # 批量比较结果 - 修复：正确关联原始数据
+    for data_item, result_item in zip(processed_data, results):
+        idx, expr_raw, ans_part, pre_error = data_item
+        result_idx, computed, user_val, error = result_item
+
+        if result_idx != idx:
+            continue
+
+        if pre_error:
+            print(f"题目 {idx} 错误: {pre_error}")
+            wrong_ids.append(idx)
+        elif error:
             print(f"题目 {idx} 错误: {error}")
             wrong_ids.append(idx)
         elif computed == user_val:
