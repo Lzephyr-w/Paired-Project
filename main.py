@@ -11,7 +11,7 @@ from typing import List, Set, Tuple
 import os
 import sys
 
-# 预编译正则表达式以提高性能
+# 预编译正则表达式
 MIXED_FRACTION_PATTERN = re.compile(r"(-?\d+)'(\d+)/(\d+)")
 FRACTION_PATTERN = re.compile(r'\b(\d+)/(\d+)\b')
 INTEGER_PATTERN = re.compile(r'\b(\d+)\b')
@@ -296,7 +296,6 @@ def build_simple_expression(bound: int) -> CalcNode:
 def decode_answer(text: str) -> Fraction:
     """解析用户答案字符串为Fraction对象"""
     s = text.strip()
-
     if not s:
         return Fraction(0)
 
@@ -342,17 +341,14 @@ def decode_answer(text: str) -> Fraction:
             # 纯整数
             return Fraction(int(s))
 
-
     except (ValueError, ZeroDivisionError):
         # 捕获所有解析错误，返回0
         return Fraction(0)
-
 
 def safe_eval_expression(expr: str) -> Fraction:
     """安全计算表达式，完全使用分数运算"""
     if not expr or expr.isspace():
         raise ValueError("空表达式")
-
     try:
         # 清理表达式
         expr = expr.strip()
@@ -437,22 +433,6 @@ def find_operand(tokens: List[str], start: int, direction: int) -> Tuple[int, in
            tokens[end] not in ['+', '-', '*', '/', '(']):
         end -= 1
     return end + 1, start
-
-
-def manual_calculate(expr: str) -> Fraction:
-    """手动计算表达式"""
-    expr = expr.replace(' ', '')
-    while '(' in expr:
-        start = expr.rfind('(')
-        end = expr.find(')', start)
-        if end == -1:
-            break
-        inner = expr[start + 1:end]
-        inner_result = calculate_simple_expression(inner)
-        expr = (expr[:start] + str(inner_result.numerator) + '/' +
-                str(inner_result.denominator) + expr[end + 1:])
-    return calculate_simple_expression(expr)
-
 
 def calculate_simple_expression(expr: str) -> Fraction:
     """计算简单表达式"""
@@ -613,7 +593,7 @@ def read_files_batch(exercise_file: str, answer_file: str):
     return exercises, answers
 
 def write_grade_batch(correct_ids: List[int], wrong_ids: List[int]):
-    """批量写入评分结果"""
+    """批量写入对错"""
     with open('Grade.txt', 'w', encoding='utf-8') as gf:
         gf.write(f"Correct: {len(correct_ids)} ({', '.join(map(str, correct_ids))})\n")
         gf.write(f"Wrong: {len(wrong_ids)} ({', '.join(map(str, wrong_ids))})\n")
