@@ -8,7 +8,8 @@ import random
 import re
 from fractions import Fraction
 from typing import List, Set, Tuple
-
+import os
+import sys
 
 # 预编译正则表达式以提高性能
 MIXED_FRACTION_PATTERN = re.compile(r"(-?\d+)'(\d+)/(\d+)")
@@ -596,6 +597,14 @@ def check_answers_batch(exercises: List[str], answers: List[str]):
     return correct_ids, wrong_ids
 
 def read_files_batch(exercise_file: str, answer_file: str):
+    # 检查文件是否存在
+    if not os.path.exists(exercise_file):
+        print(f"错误：题目文件不存在 '{exercise_file}'")
+        sys.exit(1)
+    if not os.path.exists(answer_file):
+        print(f"错误：答案文件不存在 '{answer_file}'")
+        sys.exit(1)
+
     """批量读取文件"""
     with open(exercise_file, 'r', encoding='utf-8') as ef:
         exercises = [line.strip() for line in ef if line.strip()]
